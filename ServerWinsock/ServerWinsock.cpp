@@ -9,12 +9,41 @@
 #include <iphlpapi.h>
 #include <ostream>
 #include <stdio.h>
+#include <thread>
 
 #pragma comment(lib, "Ws2_32.lib")
 #define DEFAULT_PORT "27015"
 #define DEFAULT_BUFLEN 512
 
 using namespace std;
+
+// 대화 받는 작업 쓰레드에서 진행
+void RecvThread(SOCKET sock)
+{
+    char recvbuf[DEFAULT_BUFLEN];
+    ZeroMemory(recvbuf, DEFAULT_BUFLEN);
+    int iResult;
+    while (true)
+    {
+        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN, 0);
+        
+        if (iResult > 0)
+        {
+            recvbuf[iResult] = '\0';
+            cout << "Client: " << recvbuf << endl;
+        }
+        else if (iResult == 0)
+        {
+            printf("Connection closing...\n");
+            break;
+        }
+        else
+        {
+            printf("recv failed: %d\n", WSAGetLastError());
+            break;
+        }
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -138,44 +167,26 @@ int main(int argc, char* argv[])
     
     //----------------------------------------------------------------------------------------------------------
     
+    //수신 (쓰레드) -> 끝나고 join 체크
+    thread recv_worker(RecvThread, ClientSocket);
+    
+    // 송신
     char sendbuf[DEFAULT_BUFLEN];
-    char recvbuf[DEFAULT_BUFLEN];
-    int iSendResult;
     
     while (true)
     {
-        ZeroMemory(recvbuf, DEFAULT_BUFLEN);
-        iResult = recv(ClientSocket, recvbuf, DEFAULT_BUFLEN, 0);
+        cin.getline(sendbuf, DEFAULT_BUFLEN);
         
-        if (iResult > 0)
+        if (strcmp(sendbuf, "exit") == 0)
         {
-            recvbuf[iResult] = '\0';
-            cout << "Received: " << recvbuf << endl;
-            
-            cout << "Sent: ";
-            cin.getline(sendbuf, DEFAULT_BUFLEN);
-            
-            if (strcmp(sendbuf, "exit") == 0)
-            {
-                shutdown(ClientSocket, SD_SEND);
-                break;
-            }
-            
-            iResult = send(ClientSocket, sendbuf, strlen(sendbuf), 0);
-            if (iResult == SOCKET_ERROR)
-            {
-                printf("send failed: %d\n", WSAGetLastError());
-                break;
-            }
-        }
-        else if (iResult == 0)
-        {
-            printf("Connection closing...\n");
+            shutdown(ClientSocket, SD_SEND);
             break;
         }
-        else
+        
+        iResult = send(ClientSocket, sendbuf, strlen(sendbuf), 0);
+        if (iResult == SOCKET_ERROR)
         {
-            printf("recv failed: %d\n", WSAGetLastError());
+            printf("send failed: %d\n", WSAGetLastError());
             break;
         }
     }
@@ -199,6 +210,8 @@ int main(int argc, char* argv[])
     // 클라이언트와 연결되어 있던 'ClientSocket'을 메모리에서 삭제
     // 이제 이 클라이언트와의 연결은 완전히 끊어졌습니다.
     closesocket(ClientSocket);
+    
+    if (recv_worker.joinable()) recv_worker.join();
 
     // [4] 윈도우 소켓 라이브러리 종료
     // 프로그램이 완전히 끝나는 시점이므로, "이제 네트워크 기능 안 씁니다"라고 OS에 보고합니다.

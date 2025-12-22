@@ -9,6 +9,7 @@
 #include <iphlpapi.h>
 #include <ostream>
 #include <stdio.h>
+#include <thread>
 
 // 링커에게 Ws2_32.lib 라이브러리를 링크하라고 지시 (Visual Studio 전용)
 // 이 라이브러리가 있어야 윈도우 소켓 함수들을 실행 파일에 포함시킬 수 있음
@@ -20,6 +21,34 @@
 #define DEFAULT_BUFLEN 512
 
 using namespace std;
+
+// 대화 받는 작업 쓰레드에서 진행
+void RecvThread(SOCKET sock)
+{
+    char recvbuf[DEFAULT_BUFLEN];
+    ZeroMemory(recvbuf, DEFAULT_BUFLEN);
+    int iResult;
+    while (true)
+    {
+        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN, 0);
+        
+        if (iResult > 0)
+        {
+            recvbuf[iResult] = '\0';
+            cout << "Server: " << recvbuf << endl;
+        }
+        else if (iResult == 0)
+        {
+            printf("Connection closing...\n");
+            break;
+        }
+        else
+        {
+            printf("recv failed: %d\n", WSAGetLastError());
+            break;
+        }
+    }
+}
 
 // 외부에서 값을 던져주는 통로
 // argc : 던져진 데이터의 개수
@@ -133,12 +162,12 @@ int __cdecl main(int argc, char **argv)
     
     //----------------------------------------------------------------------------------------------------------
     
+    thread recv_worker(RecvThread, ConnectSocket);
+    
     char sendbuf[DEFAULT_BUFLEN];
-    char recvbuf[DEFAULT_BUFLEN];
     
     while (true)
     {
-        cout << "Client : ";
         cin.getline(sendbuf, DEFAULT_BUFLEN);
         
         if (strcmp(sendbuf, "exit\n") == 0)
@@ -153,32 +182,19 @@ int __cdecl main(int argc, char **argv)
             printf("send() failed with error: %d\n", WSAGetLastError());
             break;
         }
-        
-        cout << " Wating Server Comment " << endl;
-        iResult = recv(ConnectSocket, recvbuf, DEFAULT_BUFLEN, 0);
-        
-        if (iResult > 0)
-        {
-            recvbuf[iResult] = '\0';
-            cout << "Server Comment " << recvbuf << endl;
-        }
-        else if (iResult == 0)
-        {
-            printf("recv() failed with error: %d\n", WSAGetLastError());
-            break;
-        }
-        else
-        {
-            printf("recv() failed with error: %d\n", WSAGetLastError());
-            break;
-        }
     }
         
     //----------------------------------------------------------------------------------------------------------
     
     // [1] 듣기/말하기 모두 불가 -> 남은 연결을 정리 -> 소켓 자원을 OS에 반납함
+    
+    // 무조건 closesocket -> join -> WSACleanup 순서 진행 : 안그러면 데드락 발생
     closesocket(ConnectSocket);
+        
+    if (recv_worker.joinable()) recv_worker.join();
+    
     WSACleanup();
+
     
     cout << "Connection Closed" << endl;
     
