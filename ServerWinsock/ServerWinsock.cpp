@@ -10,6 +10,7 @@
 #include <ostream>
 #include <stdio.h>
 #include <thread>
+#include "../Common/Packet.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 #define DEFAULT_PORT "27015"
@@ -25,12 +26,13 @@ void RecvThread(SOCKET sock)
     int iResult;
     while (true)
     {
-        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN, 0);
+        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN - 1, 0);
         
         if (iResult > 0)
         {
-            recvbuf[iResult] = '\0';
-            cout << "Client: " << recvbuf << endl;
+            Packet* p = (Packet*)recvbuf;
+            if (p->cmd == 0) cout << "--- [" << p->name << "] Login ---" << endl;
+            else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
         }
         else if (iResult == 0)
         {

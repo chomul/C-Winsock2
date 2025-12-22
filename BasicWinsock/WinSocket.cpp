@@ -10,6 +10,7 @@
 #include <ostream>
 #include <stdio.h>
 #include <thread>
+#include "../Common/Packet.h"
 
 // 링커에게 Ws2_32.lib 라이브러리를 링크하라고 지시 (Visual Studio 전용)
 // 이 라이브러리가 있어야 윈도우 소켓 함수들을 실행 파일에 포함시킬 수 있음
@@ -164,19 +165,41 @@ int __cdecl main(int argc, char **argv)
     
     thread recv_worker(RecvThread, ConnectSocket);
     
-    char sendbuf[DEFAULT_BUFLEN];
+    // 패킷 생성
+    Packet ClientPacket;
+    ClientPacket.cmd = 0;
+    cout << "Your name: ";
+    cin >> ClientPacket.name;
+    cin.ignore();
+    
+    // 로그인 과정
+    iResult = send(ConnectSocket, (char*)&ClientPacket, sizeof(Packet), 0);
+    
+    if (iResult == SOCKET_ERROR)
+    {
+        printf("send() failed with error: %d\n", WSAGetLastError());
+        closesocket(ConnectSocket);
+        if (recv_worker.joinable()) recv_worker.join();
+        WSACleanup();
+        return 1;
+    }
+    
+    cout << "--- Send Login! Start Chat ---" << endl;
+    
+    // 대화 시작
+    ClientPacket.cmd = 1;
     
     while (true)
     {
-        cin.getline(sendbuf, DEFAULT_BUFLEN);
+        cin.getline(ClientPacket.msg, DEFAULT_BUFLEN);
         
-        if (strcmp(sendbuf, "exit\n") == 0)
+        if (strcmp(ClientPacket.msg, "exit\n") == 0)
         {
             shutdown(ConnectSocket, SD_SEND);
             break;
         }
         
-        iResult = send(ConnectSocket, sendbuf, strlen(sendbuf), 0);
+        iResult = send(ConnectSocket, (char*)&ClientPacket, sizeof(Packet), 0);
         if (iResult == SOCKET_ERROR)
         {
             printf("send() failed with error: %d\n", WSAGetLastError());
@@ -190,11 +213,8 @@ int __cdecl main(int argc, char **argv)
     
     // 무조건 closesocket -> join -> WSACleanup 순서 진행 : 안그러면 데드락 발생
     closesocket(ConnectSocket);
-        
     if (recv_worker.joinable()) recv_worker.join();
-    
     WSACleanup();
-
     
     cout << "Connection Closed" << endl;
     
