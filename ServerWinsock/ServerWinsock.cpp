@@ -11,12 +11,29 @@
 #include <stdio.h>
 #include <thread>
 #include "../Common/Packet.h"
+#include <vector>
+#include <mutex>
 
 #pragma comment(lib, "Ws2_32.lib")
 #define DEFAULT_PORT "27015"
 #define DEFAULT_BUFLEN 512
 
 using namespace std;
+
+// 일단 전역 변수 -> 나중에 서버 클래스 만들어서 관리할 예정
+vector<SOCKET> ClientSockets;
+mutex client_lock; 
+
+void SendPacketToAll(Packet* p, SOCKET senderSock)
+{
+    // 보내고 있는 동안은 명단 접근 금지
+    lock_guard<mutex> lock(client_lock);
+    for (SOCKET sock : ClientSockets)
+    {
+        if (sock == senderSock) continue;
+        send(sock, (char*)p, sizeof(Packet), 0);
+    }
+}
 
 // 대화 받는 작업 쓰레드에서 진행
 void RecvThread(SOCKET sock)
@@ -33,15 +50,28 @@ void RecvThread(SOCKET sock)
             Packet* p = (Packet*)recvbuf;
             if (p->cmd == 0) cout << "--- [" << p->name << "] Login ---" << endl;
             else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
-        }
-        else if (iResult == 0)
-        {
-            printf("Connection closing...\n");
-            break;
+            
+            SendPacketToAll(p, sock);
         }
         else
         {
-            printf("recv failed: %d\n", WSAGetLastError());
+            printf("Client disconnected.\n");
+
+            // ★ 명단에서 제거하는 작업 추가
+            client_lock.lock();
+            for (int i = 0; i < ClientSockets.size(); i++)
+            {
+                if (ClientSockets[i] == sock)
+                {
+                    ClientSockets.erase(ClientSockets.begin() + i);
+                    break; 
+                }
+            }
+            client_lock.unlock();
+    
+            // 소켓 닫기
+            closesocket(sock);
+            // detach 이용해서 쓰레드를 처리했기에 따로 처리 안해도됨!!
             break;
         }
     }
@@ -141,83 +171,25 @@ int main(int argc, char* argv[])
     
     //----------------------------------------------------------------------------------------------------------
     
-    // [1] 실제 통신을 담당할 소켓 변수 선언
-    // ListenSocket은 '연결 대기용'이고, 이 ClientSocket이 '실제 대화용'입니다.
-    SOCKET ClientSocket = INVALID_SOCKET;
-
-    // [2] accept 함수: 대기열에서 손님을 한 명 끄집어냄 (Blocking)
-    // ListenSocket: 문지기 소켓 (누가 왔나 감시)
-    // NULL, NULL: 접속한 클라이언트의 IP/Port 정보를 안 받겠다는 뜻 (받으려면 구조체 넣으면 됨)
-    // ★중요★: 연결이 성립되면, accept는 '새로운 소켓(ClientSocket)'을 만들어서 반환
-    ClientSocket = accept(ListenSocket, NULL, NULL);
-    
-    if (ClientSocket == INVALID_SOCKET) 
-    {
-        printf("accept failed: %d\n", WSAGetLastError());
-        closesocket(ListenSocket); 
-        WSACleanup();
-        return 1;
-    }
-    
-    // [4] 문지기 소켓 닫기 (선택 사항이지만 중요!)
-    // "나는 손님 한 명(ClientSocket)이랑만 대화하면 돼. 더 이상 다른 손님은 안 받을래."
-    // 라는 뜻입니다. 1:1 통신만 할 거라면 리소스 절약을 위해 닫는 게 좋습니다.
-    // (만약 채팅 서버처럼 계속 여러 명을 받아야 한다면 이걸 닫으면 안 됩니다!) ★★★★★
-    closesocket(ListenSocket);
-    
-    cout << "Accept Success" << endl;
-    
-    //----------------------------------------------------------------------------------------------------------
-    
-    //수신 (쓰레드) -> 끝나고 join 체크
-    thread recv_worker(RecvThread, ClientSocket);
-    
-    // 송신
-    char sendbuf[DEFAULT_BUFLEN];
-    
     while (true)
     {
-        cin.getline(sendbuf, DEFAULT_BUFLEN);
+        SOCKET ClientSocket = accept(ListenSocket, NULL, NULL);
         
-        if (strcmp(sendbuf, "exit") == 0)
+        if (ClientSocket == INVALID_SOCKET) 
         {
-            shutdown(ClientSocket, SD_SEND);
-            break;
+            printf("accept failed: %d\n", WSAGetLastError());
+            continue;
         }
         
-        iResult = send(ClientSocket, sendbuf, strlen(sendbuf), 0);
-        if (iResult == SOCKET_ERROR)
-        {
-            printf("send failed: %d\n", WSAGetLastError());
-            break;
-        }
+        client_lock.lock();
+        ClientSockets.push_back(ClientSocket);
+        client_lock.unlock();
+        
+        cout << "Client Connected! (Socket: " << ClientSocket << ")" << endl;
+        
+        thread(RecvThread, ClientSocket).detach(); // 매우 중요!!!
     }
     
-    //----------------------------------------------------------------------------------------------------------
-    
-    // [1] 서버 측 종료 선언 (Half-Close)
-    // 클라이언트가 먼저 끊었지만(recv == 0), TCP는 양방향 통신입니다.
-    // 서버 입장에서도 "나도 너한테 보낼 데이터가 더 이상 없어"라고 확실하게 말해주는(FIN 패킷 전송) 과정입니다.
-    iResult = shutdown(ClientSocket, SD_SEND);
-    
-    if (iResult == SOCKET_ERROR) 
-    {
-        printf("shutdown failed: %d\n", WSAGetLastError());
-        closesocket(ClientSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    // [3] 담당자 소켓 소멸 (리소스 해제)
-    // 클라이언트와 연결되어 있던 'ClientSocket'을 메모리에서 삭제
-    // 이제 이 클라이언트와의 연결은 완전히 끊어졌습니다.
-    closesocket(ClientSocket);
-    
-    if (recv_worker.joinable()) recv_worker.join();
-
-    // [4] 윈도우 소켓 라이브러리 종료
-    // 프로그램이 완전히 끝나는 시점이므로, "이제 네트워크 기능 안 씁니다"라고 OS에 보고합니다.
     WSACleanup();
-
     return 0;
 }

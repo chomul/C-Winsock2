@@ -31,12 +31,13 @@ void RecvThread(SOCKET sock)
     int iResult;
     while (true)
     {
-        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN, 0);
+        iResult = recv(sock, recvbuf, DEFAULT_BUFLEN - 1, 0);
         
         if (iResult > 0)
         {
-            recvbuf[iResult] = '\0';
-            cout << "Server: " << recvbuf << endl;
+            Packet* p = (Packet*)recvbuf;
+            if (p->cmd == 0) cout << "--- [" << p->name << "] Login ---" << endl;
+            else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
         }
         else if (iResult == 0)
         {
@@ -62,11 +63,15 @@ int __cdecl main(int argc, char **argv)
     WSADATA wsaData; // 윈도우 소켓 구현 정보를 담을 구조체
     int iResult;
     
-    // 프로그램 실행 시 인자(서버 주소)가 없으면 에러 처리 (예: 실행 시 "client.exe 127.0.0.1" 처럼 IP를 줘야 함)
-    if (argc != 2) 
+    const char* serverIp = "127.0.0.1"; // 기본값
+    
+    if (argc == 2)
     {
-        printf("usage: %s server-name\n", argv[0]);
-        return 1;
+        serverIp = argv[1]; // 사용자가 직접 입력했으면 그걸 씀
+    }
+    else
+    {
+        printf("No IP input. Defaulting to 127.0.0.1\n");
     }
 
     // WSAStartup: Winsock DLL(Ws2_32.dll) 사용을 시작하겠다고 운영체제에 알림
@@ -93,7 +98,7 @@ int __cdecl main(int argc, char **argv)
     // getaddrinfo: 도메인 이름(argv[1])과 포트(DEFAULT_PORT)를 이용해 
     // 한 서버의 접속 가능한 주소 목록(List of Addresses)을 얻어와 'result'에 저장함.
     // 예: google.com이라고 쳤을 때, 접속 가능한 IPv4 주소, IPv6 주소 등을 모두 가져와서 result
-    iResult = getaddrinfo(argv[1], DEFAULT_PORT, &hints, &result);
+    iResult = getaddrinfo(serverIp, DEFAULT_PORT, &hints, &result);
     if (iResult != 0) 
     {
         printf("getaddrinfo failed: %d\n", iResult);
@@ -193,12 +198,12 @@ int __cdecl main(int argc, char **argv)
     {
         cin.getline(ClientPacket.msg, DEFAULT_BUFLEN);
         
-        if (strcmp(ClientPacket.msg, "exit\n") == 0)
+        if (strcmp(ClientPacket.msg, "exit") == 0)
         {
             shutdown(ConnectSocket, SD_SEND);
             break;
         }
-        
+        cout << "[" << ClientPacket.name << "] : " << ClientPacket.msg << endl;
         iResult = send(ConnectSocket, (char*)&ClientPacket, sizeof(Packet), 0);
         if (iResult == SOCKET_ERROR)
         {
