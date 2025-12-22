@@ -133,61 +133,46 @@ int __cdecl main(int argc, char **argv)
     
     //----------------------------------------------------------------------------------------------------------
     
-    int recvbuflen = DEFAULT_BUFLEN;
+    char sendbuf[DEFAULT_BUFLEN];
+    char recvbuf[DEFAULT_BUFLEN];
     
-    // [1] 보낼 문자열 "this is a test" 정의
-    const char *sendbuf = "this is a test";
-    char recvbuf[DEFAULT_BUFLEN]; // 받을 공간(버퍼) 준비
-    
-    // [2] send 함수: 실제 데이터를 서버로 쏩니다.
-    // ConnectSocket: 연결된 소켓
-    // sendbuf: 보낼 데이터의 주소
-    // strlen(sendbuf): 보낼 데이터의 길이 (바이트 단위)
-    iResult = send(ConnectSocket, sendbuf, strlen(sendbuf), 0);
-    if (iResult == SOCKET_ERROR)
+    while (true)
     {
-        printf("send() failed with error: %d\n", WSAGetLastError());
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return 1;
-    }
-    
-    printf("Bytes Sent: %ld\n", iResult);
-    
-    // 나 이제 보낼 데이터 없어! (더 이상 send 안 하겠다 선언)
-    // 하지만 네가 보내는 건 들을 수 있어. (recv는 가능)
-    iResult = shutdown(ConnectSocket, SD_SEND);
-    if (iResult == SOCKET_ERROR)
-    {
-        printf("shutdown() failed with error: %d\n", WSAGetLastError());
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return 1;
-    }
-    
-    //서버가 연결을 끊을 때(0 리턴)까지 계속 받아야 모든 데이터를 안전하게 가져올 수 있음
-    do {
-        // [3] 서버가 보내주는 데이터를 기다림 (Blocking)
-        // recvbuflen만큼의 크기 내에서 데이터를 받아서 recvbuf에 저장
-        iResult = recv(ConnectSocket, recvbuf, recvbuflen, 0);
+        cout << "Client : ";
+        cin.getline(sendbuf, DEFAULT_BUFLEN);
+        
+        if (strcmp(sendbuf, "exit\n") == 0)
+        {
+            shutdown(ConnectSocket, SD_SEND);
+            break;
+        }
+        
+        iResult = send(ConnectSocket, sendbuf, strlen(sendbuf), 0);
+        if (iResult == SOCKET_ERROR)
+        {
+            printf("send() failed with error: %d\n", WSAGetLastError());
+            break;
+        }
+        
+        cout << " Wating Server Comment " << endl;
+        iResult = recv(ConnectSocket, recvbuf, DEFAULT_BUFLEN, 0);
+        
         if (iResult > 0)
         {
-            printf("Bytes received: %d\n", iResult);
-            
-            // 받은 문자열 출력해보기
-            if (iResult < DEFAULT_BUFLEN) 
-            {
-                recvbuf[iResult] = '\0'; // 받은 데이터 끝에 널 문자 수동 추가
-                printf("Message: %s\n", recvbuf); // 내용 출력
-            }
+            recvbuf[iResult] = '\0';
+            cout << "Server Comment " << recvbuf << endl;
         }
         else if (iResult == 0)
-            printf("Connection closed\n");
+        {
+            printf("recv() failed with error: %d\n", WSAGetLastError());
+            break;
+        }
         else
-            printf("recv failed: %d\n", WSAGetLastError());
-    } while (iResult > 0);
-    
-    cout << "Send, Received Succece" << endl;
+        {
+            printf("recv() failed with error: %d\n", WSAGetLastError());
+            break;
+        }
+    }
         
     //----------------------------------------------------------------------------------------------------------
     

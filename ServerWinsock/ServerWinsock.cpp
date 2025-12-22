@@ -138,56 +138,47 @@ int main(int argc, char* argv[])
     
     //----------------------------------------------------------------------------------------------------------
     
-    char recvbuf[DEFAULT_BUFLEN];     // 데이터를 받을 그릇(버퍼)
-    int iSendResult;                 // send 함수의 결과(보낸 바이트 수) 저장
-    int recvbuflen = DEFAULT_BUFLEN; // 버퍼의 최대 크기
-
-    // do-while 루프: 클라이언트가 연결을 끊을 때까지 계속 대화
-    do 
+    char sendbuf[DEFAULT_BUFLEN];
+    char recvbuf[DEFAULT_BUFLEN];
+    int iSendResult;
+    
+    while (true)
     {
-        // [1] 데이터 수신 (듣기)
-        // ClientSocket: accept로 만든 '담당자 소켓'
-        // recvbuf: 데이터를 저장할 메모리 공간
-        // recvbuflen: 버퍼의 최대 크기 (이 이상은 한 번에 못 받음)
-        // 0: 플래그 (기본값)
-        // ★특징: 데이터가 올 때까지 여기서 프로그램이 멈춰있습니다(Blocking).
-        iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-
-        // [2] 상황별 처리
-        if (iResult > 0) // A. 데이터를 성공적으로 받음 (iResult = 받은 바이트 수)
+        ZeroMemory(recvbuf, DEFAULT_BUFLEN);
+        iResult = recv(ClientSocket, recvbuf, DEFAULT_BUFLEN, 0);
+        
+        if (iResult > 0)
         {
-            printf("Bytes received: %d\n", iResult);
-
-            // [3] 에코(Echo) 전송 (말 따라하기)
-            // 받은 데이터(recvbuf)를 그대로 다시 클라이언트에게 보냅니다.
-            // ★중요: 보낼 크기는 'recvbuflen(512)'이 아니라 'iResult(실제 받은 크기)'여야 합니다.
-            iSendResult = send(ClientSocket, recvbuf, iResult, 0);
+            recvbuf[iResult] = '\0';
+            cout << "Received: " << recvbuf << endl;
             
-            if (iSendResult == SOCKET_ERROR) 
+            cout << "Sent: ";
+            cin.getline(sendbuf, DEFAULT_BUFLEN);
+            
+            if (strcmp(sendbuf, "exit") == 0)
+            {
+                shutdown(ClientSocket, SD_SEND);
+                break;
+            }
+            
+            iResult = send(ClientSocket, sendbuf, strlen(sendbuf), 0);
+            if (iResult == SOCKET_ERROR)
             {
                 printf("send failed: %d\n", WSAGetLastError());
-                closesocket(ClientSocket); // 소켓 닫고
-                WSACleanup();              // 퇴근
-                return 1;
+                break;
             }
-            printf("Bytes sent: %d\n", iSendResult);
-        } 
-        else if (iResult == 0) // B. 연결 종료 요청 (Client가 shutdown 함수 호출함)
-        {
-            // 클라이언트가 "나 이제 할 말 없어(FIN)"라고 했을 때 0이 리턴
-            printf("Connection closing...\n");
         }
-        else // C. 에러 발생 (iResult < 0)
+        else if (iResult == 0)
+        {
+            printf("Connection closing...\n");
+            break;
+        }
+        else
         {
             printf("recv failed: %d\n", WSAGetLastError());
-            closesocket(ClientSocket);
-            WSACleanup();
-            return 1;
+            break;
         }
-
-        // iResult가 0보다 크면(데이터가 계속 오면) 루프를 계속 돕니다.
-        // iResult가 0이면(연결 끊김) 루프를 탈출
-    } while (iResult > 0);
+    }
     
     //----------------------------------------------------------------------------------------------------------
     
