@@ -8,3 +8,8 @@ struct Packet
     char name[20];     // 이름
     char msg[100];     // 메시지
 };
+
+struct ClientInfo {
+    SOCKET sock;
+    char name[20];
+};

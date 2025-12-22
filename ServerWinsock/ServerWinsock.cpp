@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <thread>
 #include "../Common/Packet.h"
-#include <vector>
+#include <unordered_map>
 #include <mutex>
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -21,15 +21,16 @@
 using namespace std;
 
 // 일단 전역 변수 -> 나중에 서버 클래스 만들어서 관리할 예정
-vector<SOCKET> ClientSockets;
+unordered_map<SOCKET, ClientInfo> ClientMap;
 mutex client_lock; 
 
 void SendPacketToAll(Packet* p, SOCKET senderSock)
 {
     // 보내고 있는 동안은 명단 접근 금지
     lock_guard<mutex> lock(client_lock);
-    for (SOCKET sock : ClientSockets)
+    for (auto& pair : ClientMap)
     {
+        SOCKET sock = pair.first;
         if (sock == senderSock) continue;
         send(sock, (char*)p, sizeof(Packet), 0);
     }
@@ -48,7 +49,13 @@ void RecvThread(SOCKET sock)
         if (iResult > 0)
         {
             Packet* p = (Packet*)recvbuf;
-            if (p->cmd == 0) cout << "--- [" << p->name << "] Login ---" << endl;
+            if (p->cmd == 0)
+            {
+                cout << "--- [" << p->name << "] Login ---" << endl;
+                client_lock.lock();
+                strcpy_s(ClientMap[sock].name, p->name);
+                client_lock.unlock();
+            }
             else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
             
             SendPacketToAll(p, sock);
@@ -59,14 +66,7 @@ void RecvThread(SOCKET sock)
 
             // ★ 명단에서 제거하는 작업 추가
             client_lock.lock();
-            for (int i = 0; i < ClientSockets.size(); i++)
-            {
-                if (ClientSockets[i] == sock)
-                {
-                    ClientSockets.erase(ClientSockets.begin() + i);
-                    break; 
-                }
-            }
+            ClientMap.erase(sock);
             client_lock.unlock();
     
             // 소켓 닫기
@@ -181,8 +181,12 @@ int main(int argc, char* argv[])
             continue;
         }
         
+        ClientInfo newClient;
+        newClient.sock = ClientSocket;
+        strcpy_s(newClient.name, "Guest"); // 아직 누군지 모르니 일단 Guest
+        
         client_lock.lock();
-        ClientSockets.push_back(ClientSocket);
+        ClientMap[ClientSocket] = newClient;
         client_lock.unlock();
         
         cout << "Client Connected! (Socket: " << ClientSocket << ")" << endl;
