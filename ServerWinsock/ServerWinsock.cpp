@@ -22,11 +22,12 @@ using namespace std;
 
 // 일단 전역 변수 -> 나중에 서버 클래스 만들어서 관리할 예정
 unordered_map<SOCKET, ClientInfo> ClientMap;
+unordered_map<string, SOCKET> NameMap;
 mutex client_lock; 
 
 void SendPacketToAll(Packet* p, SOCKET senderSock)
 {
-    // 보내고 있는 동안은 명단 접근 금지
+    // 보내고 있는 동안은 명단 접근 금지 (lock_guard : 함수 종료시 자동 lock 해제)
     lock_guard<mutex> lock(client_lock);
     for (auto& pair : ClientMap)
     {
@@ -34,6 +35,15 @@ void SendPacketToAll(Packet* p, SOCKET senderSock)
         if (sock == senderSock) continue;
         send(sock, (char*)p, sizeof(Packet), 0);
     }
+}
+
+void SendPacketToTarget(Packet* p)
+{
+    lock_guard<mutex> lock(client_lock);
+    if (NameMap.find(p->target) != NameMap.end())
+        send(NameMap[p->target], (char*)p, sizeof(Packet), 0);
+    else
+        cout << "User not found: " << p->target << endl;
 }
 
 // 대화 받는 작업 쓰레드에서 진행
@@ -49,16 +59,35 @@ void RecvThread(SOCKET sock)
         if (iResult > 0)
         {
             Packet* p = (Packet*)recvbuf;
-            if (p->cmd == 0)
-            {
-                cout << "--- [" << p->name << "] Login ---" << endl;
-                client_lock.lock();
-                strcpy_s(ClientMap[sock].name, p->name);
-                client_lock.unlock();
-            }
-            else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
             
-            SendPacketToAll(p, sock);
+            switch (p->cmd)
+            {
+                case 0:
+                    {
+                        cout << "--- [" << p->name << "] Login ---" << endl;
+                        client_lock.lock();
+                        strcpy_s(ClientMap[sock].name, p->name);
+                        NameMap[p->name] = sock;
+                        client_lock.unlock();
+                        break;
+                    }
+                case 1:
+                    {
+                        cout << "[" << p->name << "]: " << p->msg << endl;
+                        SendPacketToAll(p, sock);
+                        break;
+                    }
+                case 2:
+                    {
+                        cout << "[" << p->name << " -> " << p->target << "]: " << p->msg << endl;
+                        SendPacketToTarget(p);
+                        break;
+                    }
+                default:
+                    {
+                        SendPacketToAll(p, sock);
+                    }
+            }
         }
         else
         {
@@ -66,6 +95,7 @@ void RecvThread(SOCKET sock)
 
             // ★ 명단에서 제거하는 작업 추가
             client_lock.lock();
+            NameMap.erase(ClientMap[sock].name);
             ClientMap.erase(sock);
             client_lock.unlock();
     

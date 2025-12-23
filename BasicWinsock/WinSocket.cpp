@@ -36,8 +36,29 @@ void RecvThread(SOCKET sock)
         if (iResult > 0)
         {
             Packet* p = (Packet*)recvbuf;
-            if (p->cmd == 0) cout << "--- [" << p->name << "] Login ---" << endl;
-            else if (p->cmd == 1) cout << "[" << p->name << "]: " << p->msg << endl;
+            
+            switch (p->cmd)
+            {
+                case 0:
+                    {
+                        cout << "--- [" << p->name << "] Login ---" << endl;
+                        break;
+                    }
+                case 1:
+                    {
+                        cout << "[" << p->name << "]: " << p->msg << endl;
+                        break;
+                    }
+                case 2:
+                    {
+                        cout << "[" << p->name << " -> " << p->target << "]: " << p->msg << endl;
+                        break;
+                    }
+                default:
+                    {
+                        break;
+                    }
+            }
         }
         else if (iResult == 0)
         {
@@ -191,19 +212,33 @@ int __cdecl main(int argc, char **argv)
     
     cout << "--- Send Login! Start Chat ---" << endl;
     
-    // 대화 시작
-    ClientPacket.cmd = 1;
-    
     while (true)
     {
         cin.getline(ClientPacket.msg, DEFAULT_BUFLEN);
-        
+        ClientPacket.cmd = 1;
         if (strcmp(ClientPacket.msg, "exit") == 0)
         {
             shutdown(ConnectSocket, SD_SEND);
             break;
         }
-        cout << "[" << ClientPacket.name << "] : " << ClientPacket.msg << endl;
+        
+        // 귓속말 전송
+        if (ClientPacket.msg[0] == '/' && ClientPacket.msg[1] == 'w' && ClientPacket.msg[2] == ' ')
+        {
+            ClientPacket.cmd = 2;
+            char targetName[20];
+            char message[100];
+            
+            sscanf_s(ClientPacket.msg + 3, "%s %[^\n]", targetName, (unsigned)20, message, (unsigned)100);
+            strcpy_s(ClientPacket.target, targetName);
+            strcpy_s(ClientPacket.msg, message);
+            cout << "[" << ClientPacket.name << " -> " << targetName << "]: " << message << endl;
+        }
+        else
+        {
+            cout << "[" << ClientPacket.name << "] : " << ClientPacket.msg << endl;
+        }
+        
         iResult = send(ConnectSocket, (char*)&ClientPacket, sizeof(Packet), 0);
         if (iResult == SOCKET_ERROR)
         {
